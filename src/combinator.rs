@@ -1,6 +1,6 @@
 use crate::router::{Router, Via};
 use futures::prelude::*;
-use std::hash::{Hash, Hasher};
+use std::hash::Hash;
 
 pub trait RunVia<T, E> {
     fn via<K: Hash + 'static>(self, router: Router, key: K) -> Via<T, E>;
