@@ -3,6 +3,11 @@ name = "ert"
 version = "0.1.0"
 authors = ["Yushi Omote <yushi.omote@sbibits.com>"]
 edition = "2018"
+license = "MIT"
+repository = "https://github.com/YushiOMOTE/ert"
+description = "A combinator to control future execution order."
+keywords = ["futures", "ert"]
+readme = "README.md"
 
 [dependencies]
 log = "0.4"
