@@ -2,6 +2,10 @@
 
 A combinator to control future execution order.
 
+[![Latest version](https://img.shields.io/crates/v/ert.svg)](https://crates.io/crates/ert)
+[![Documentation](https://docs.rs/ert/badge.svg)](https://docs.rs/ert)
+![License](https://img.shields.io/crates/l/ert.svg)
+
 ```rust
 struct Data {
     file: String,
