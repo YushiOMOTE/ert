@@ -1,4 +1,7 @@
+use crate::utils::set_worker_id;
+
 use futures::{
+    future::lazy,
     prelude::*,
     sync::{mpsc, oneshot},
 };
@@ -70,9 +73,12 @@ impl Router {
         }
 
         let tx = (0..workers)
-            .map(|_| {
+            .map(|wid| {
                 let (tx, rx) = mpsc::unbounded();
-                let _ = e.spawn(rx.for_each(|t| t));
+                let _ = e.spawn(lazy(move || {
+                    set_worker_id(wid);
+                    rx.for_each(|t| t)
+                }));
                 tx
             })
             .collect();
