@@ -2,9 +2,20 @@ use crate::router::{Router, Via};
 use futures::prelude::*;
 use std::hash::Hash;
 
+///
+/// Future combinator to setup sequential execution.
+///
 pub trait RunVia<T, E> {
+    ///
+    /// Sequentially evaluate a future in a worker which is associated with `key`,
+    /// using `router`.
+    ///
     fn via<K: Hash + 'static>(self, router: Router, key: K) -> Via<T, E>;
 
+    ///
+    /// Sequentially evaluate a future in a worker which is associated with `key`
+    /// in a global router.
+    ///
     fn via_g<K: Hash + 'static>(self, key: K) -> Via<T, E>;
 }
 

@@ -19,6 +19,9 @@ lazy_static::lazy_static! {
     static ref GLOBAL_ROUTER: RwLock<Option<Router>> = { RwLock::new(None) };
 }
 
+///
+/// Router to provide sequential execution of certain set of tasks.
+///
 #[derive(Clone)]
 pub struct Router {
     tx: Arc<Vec<mpsc::UnboundedSender<BoxedFuture>>>,
@@ -67,6 +70,30 @@ impl<T, E> Future for Via<T, E> {
 }
 
 impl Router {
+    ///
+    /// Create a new router.
+    ///
+    /// The created router object can be passed to `.via()` combinator.
+    ///
+    /// ```
+    /// use ert::prelude::*;
+    /// use futures::prelude::*;
+    ///
+    /// let mut rt = tokio::runtime::Runtime::new().unwrap();
+    ///
+    /// let router = Router::new(rt.executor(), 1000);
+    ///
+    /// let f = futures::stream::iter_ok::<_, ()>(0..1000)
+    ///           .map(move |i| {
+    ///               futures::future::ok(i)
+    ///                   .via(router.clone(), i)
+    ///           })
+    ///           .buffered(100)
+    ///           .for_each(|_| Ok(()));
+    ///
+    /// rt.block_on(f);
+    /// ```
+    ///
     pub fn new(e: TaskExecutor, workers: usize) -> Self {
         if workers == 0 {
             panic!("Invalid number of workers: {}", workers);
@@ -87,6 +114,30 @@ impl Router {
         Self { tx }
     }
 
+    ///
+    /// Create a new router with a background thread which executes the router.
+    ///
+    /// This is to hide the boilerplate to create the tokio runtime.
+    /// The created router is set as a global router, which can be used by `.via_g()` combinator.
+    /// Hence, users don't have to pass around handles to a specific router instance.
+    ///
+    /// ```
+    /// use ert::prelude::*;
+    /// use futures::prelude::*;
+    ///
+    /// Router::run_on_thread(1000);
+    ///
+    /// let f = futures::stream::iter_ok::<_, ()>(0..1000)
+    ///           .map(move |i| {
+    ///               futures::future::ok(i)
+    ///                   .via_g(i)
+    ///           })
+    ///           .buffered(100)
+    ///           .for_each(|_| Ok(()));
+    ///
+    /// tokio::run(f);
+    /// ```
+    ///
     pub fn run_on_thread(workers: usize) -> Self {
         let rt = Runtime::new().unwrap();
 
@@ -99,10 +150,51 @@ impl Router {
         router
     }
 
+    ///
+    /// Set a router as a global router.
+    ///
+    /// The created router can be used by `.via_g()` combinator.
+    /// Hence, users don't have to pass around handles to a specific router instance.
+    ///
+    /// ```
+    /// use ert::prelude::*;
+    /// use futures::prelude::*;
+    ///
+    /// let mut rt = tokio::runtime::Runtime::new().unwrap();
+    ///
+    /// let router = Router::new(rt.executor(), 1000);
+    /// router.set_as_global();
+    ///
+    /// let f = futures::stream::iter_ok::<_, ()>(0..1000)
+    ///           .map(move |i| {
+    ///               futures::future::ok(i)
+    ///                   .via_g(i)
+    ///           })
+    ///           .buffered(100)
+    ///           .for_each(|_| Ok(()));
+    ///
+    /// rt.block_on(f);
+    /// ```
+    ///
     pub fn set_as_global(self) {
         *GLOBAL_ROUTER.write().unwrap() = Some(self);
     }
 
+    ///
+    /// Helper method to access to a global router.
+    ///
+    /// ```
+    /// use ert::Router;
+    ///
+    /// let rt = tokio::runtime::Runtime::new().unwrap();
+    /// let router = Router::new(rt.executor(), 1000);
+    /// router.set_as_global();
+    ///
+    /// Router::with_global(|global_router| {
+    ///    // Do something
+    /// });
+    /// ```
+    ///
     pub fn with_global<F, R>(f: F) -> R
     where
         F: FnOnce(Option<&Router>) -> R,
@@ -110,6 +202,27 @@ impl Router {
         f(GLOBAL_ROUTER.read().unwrap().as_ref())
     }
 
+    ///
+    /// Send a logic to a worker in a router.
+    ///
+    /// ```
+    /// use ert::prelude::*;
+    /// use futures::prelude::*;
+    ///
+    /// let mut rt = tokio::runtime::Runtime::new().unwrap();
+    ///
+    /// let router = Router::new(rt.executor(), 1000);
+    ///
+    /// let f = futures::stream::iter_ok::<_, ()>(0..1000)
+    ///           .map(move |i| {
+    ///               router.via(i, || Ok(()))
+    ///           })
+    ///           .buffered(100)
+    ///           .for_each(|_| Ok(()));
+    ///
+    /// rt.block_on(f);
+    /// ```
+    ///
     pub fn via<K, F, T, E, R>(&self, key: K, f: F) -> Via<T, E>
     where
         K: Hash,
