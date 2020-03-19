@@ -1,6 +1,6 @@
 [package]
 name = "ert"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["Yushi Omote <yushi.omote@sbibits.com>"]
 edition = "2018"
 license = "MIT"
