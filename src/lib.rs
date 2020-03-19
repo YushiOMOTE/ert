@@ -5,3 +5,5 @@ pub mod prelude {
     pub use crate::combinator::RunVia;
     pub use crate::router::Router;
 }
+
+pub use crate::router::current;

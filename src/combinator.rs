@@ -2,26 +2,25 @@ use crate::router::{Router, Via};
 use futures::prelude::*;
 use std::hash::Hash;
 
-pub trait RunVia<T, E> {
-    fn via<K: Hash + 'static>(self, router: Router, key: K) -> Via<T, E>;
+pub trait RunVia<T> {
+    fn via<K: Hash + 'static>(self, router: Router, key: K) -> Via<T>;
 
-    fn via_g<K: Hash + 'static>(self, key: K) -> Via<T, E>;
+    fn via_g<K: Hash + 'static>(self, key: K) -> Via<T>;
 }
 
-impl<U> RunVia<U::Item, U::Error> for U
+impl<U> RunVia<U::Output> for U
 where
     U: Future + Send + 'static,
-    U::Item: Send + 'static,
-    U::Error: Send + 'static,
+    U::Output: Send + 'static,
 {
-    fn via<K>(self, router: Router, key: K) -> Via<U::Item, U::Error>
+    fn via<K>(self, router: Router, key: K) -> Via<U::Output>
     where
         K: Hash + 'static,
     {
         router.via(key, move || self)
     }
 
-    fn via_g<K>(self, key: K) -> Via<U::Item, U::Error>
+    fn via_g<K>(self, key: K) -> Via<U::Output>
     where
         K: Hash + 'static,
     {

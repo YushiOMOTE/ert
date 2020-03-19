@@ -1,46 +1,39 @@
+mod helper;
+
+use self::helper::Checker;
 use ert::prelude::*;
-use futures::task::current;
-use std::{
-    collections::HashMap,
-    sync::{Arc, Mutex},
-};
-use tokio::{prelude::*, runtime::Runtime};
+use futures::prelude::*;
 
-#[test]
-fn global() {
-    let mut rt = Runtime::new().unwrap();
+#[tokio::test]
+async fn global() {
+    Router::new(100).set_as_global();
 
-    Router::new(rt.executor(), 100).set_as_global();
+    let c = Checker::new();
 
-    let map = Arc::new(Mutex::new(HashMap::new()));
-
-    let map1 = map.clone();
+    let c1 = c.clone();
     let futs: Vec<_> = (0u64..100)
         .map(move |i| {
-            let map2 = map1.clone();
-            Ok::<_, ()>(())
-                .into_future()
-                .map(move |_| {
-                    map2.lock().unwrap().insert(i, current());
-                })
-                .via_g(i)
+            let c1 = c1.clone();
+            async move {
+                c1.add(i);
+            }
+            .via_g(i)
         })
         .collect();
 
+    let c2 = c.clone();
     let futs2: Vec<_> = (0u64..10000)
         .map(move |i| {
             let i = i % 100;
-            let map2 = map.clone();
-            Ok::<_, ()>(())
-                .into_future()
-                .map(move |_| {
-                    assert_eq!(map2.lock().unwrap().get(&i).unwrap().is_current(), true);
-                })
-                .via_g(i)
+            let c2 = c2.clone();
+            async move {
+                c2.check(i);
+            }
+            .via_g(i)
         })
         .collect();
 
-    let f = futures::future::join_all(futs).and_then(|_| futures::future::join_all(futs2));
+    let f = futures::future::join_all(futs).then(|_| futures::future::join_all(futs2));
 
-    rt.block_on(f).unwrap();
+    f.await;
 }
