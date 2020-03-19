@@ -1,16 +1,20 @@
-use futures::{
-    prelude::*,
-    sync::{mpsc, oneshot},
-};
+use futures::{future::BoxFuture, prelude::*};
 use log::*;
 use std::{
     collections::hash_map::DefaultHasher,
     hash::{Hash, Hasher},
+    pin::Pin,
     sync::{Arc, RwLock},
+    task::{Context, Poll},
 };
-use tokio::runtime::{Runtime, TaskExecutor};
+use tokio::{
+    runtime::Builder,
+    sync::{mpsc, oneshot},
+    task::JoinHandle,
+};
 
-type BoxedFuture = Box<dyn Future<Item = (), Error = ()> + Send + 'static>;
+type Sender = mpsc::UnboundedSender<BoxFuture<'static, ()>>;
+type Receiver = mpsc::UnboundedReceiver<BoxFuture<'static, ()>>;
 
 lazy_static::lazy_static! {
     static ref GLOBAL_ROUTER: RwLock<Option<Router>> = { RwLock::new(None) };
@@ -18,28 +22,27 @@ lazy_static::lazy_static! {
 
 #[derive(Clone)]
 pub struct Router {
-    tx: Arc<Vec<mpsc::UnboundedSender<BoxedFuture>>>,
+    tx: Arc<Vec<Sender>>,
 }
 
-pub struct Via<T, E>(oneshot::Receiver<Result<T, E>>);
+pub struct Via<T>(oneshot::Receiver<T>);
 
-impl<T, E> Via<T, E> {
-    fn new<F, R>(tx: &mpsc::UnboundedSender<BoxedFuture>, f: F) -> Self
+impl<T> Via<T> {
+    fn new<F, R>(tx: &Sender, f: F) -> Self
     where
         T: Send + 'static,
-        E: Send + 'static,
         F: FnOnce() -> R,
-        R: IntoFuture<Item = T, Error = E>,
-        R::Future: Send + 'static,
+        R: Future<Output = T> + Send + 'static,
     {
         let (otx, orx) = oneshot::channel();
 
-        let fut = Box::new(f().into_future().then(move |r| {
-            let _ = otx.send(r);
-            Ok(())
-        }));
+        let fut = f()
+            .then(move |r| async move {
+                let _ = otx.send(r);
+            })
+            .boxed();
 
-        if tx.unbounded_send(fut).is_err() {
+        if tx.send(fut).is_err() {
             warn!("Couldn't send future to router; the future will never be resolved");
         }
 
@@ -47,50 +50,62 @@ impl<T, E> Via<T, E> {
     }
 }
 
-impl<T, E> Future for Via<T, E> {
-    type Item = T;
-    type Error = E;
+impl<T> Future for Via<T> {
+    type Output = T;
 
-    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
-        match self.0.poll() {
-            Ok(Async::Ready(res)) => res.map(|ok| Async::Ready(ok)),
-            Ok(Async::NotReady) => Ok(Async::NotReady),
-            Err(_) => {
-                warn!("Router isn't running; this future will never be resolved");
-                Ok(Async::NotReady)
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
+        match self.0.poll_unpin(cx) {
+            Poll::Ready(Ok(output)) => Poll::Ready(output),
+            Poll::Ready(Err(_)) | Poll::Pending => {
+                // Oneshot cancelled, meaning this feature never gets resolved
+                Poll::Pending
             }
         }
     }
 }
 
+fn open(workers: usize) -> (Vec<Sender>, Vec<Receiver>) {
+    (0..workers).map(|_| mpsc::unbounded_channel()).unzip()
+}
+
+fn run(rxs: Vec<Receiver>) -> Vec<JoinHandle<()>> {
+    rxs.into_iter()
+        .map(|rx| tokio::spawn(rx.for_each(|t| async move { t.await })))
+        .collect()
+}
+
 impl Router {
-    pub fn new(e: TaskExecutor, workers: usize) -> Self {
+    pub fn new(workers: usize) -> Self {
         if workers == 0 {
             panic!("Invalid number of workers: {}", workers);
         }
 
-        let tx = (0..workers)
-            .map(|_| {
-                let (tx, rx) = mpsc::unbounded();
-                let _ = e.spawn(rx.for_each(|t| t));
-                tx
-            })
-            .collect();
-        let tx = Arc::new(tx);
+        let (txs, rxs) = open(workers);
 
-        Self { tx }
+        run(rxs);
+
+        Self { tx: Arc::new(txs) }
     }
 
     pub fn run_on_thread(workers: usize) -> Self {
-        let rt = Runtime::new().unwrap();
+        let (txs, rxs) = open(workers);
 
-        let router = Self::new(rt.executor(), workers);
-
-        std::thread::spawn(|| {
-            rt.shutdown_on_idle().wait().unwrap();
+        std::thread::spawn(move || {
+            let mut rt = Builder::new()
+                .threaded_scheduler()
+                .enable_all()
+                .build()
+                .unwrap();
+            rt.block_on(async move {
+                for h in run(rxs) {
+                    if let Err(e) = h.await {
+                        error!("Couldn't join router worker thread successfully: {}", e);
+                    }
+                }
+            });
         });
 
-        router
+        Self { tx: Arc::new(txs) }
     }
 
     pub fn set_as_global(self) {
@@ -104,14 +119,12 @@ impl Router {
         f(GLOBAL_ROUTER.read().unwrap().as_ref())
     }
 
-    pub fn via<K, F, T, E, R>(&self, key: K, f: F) -> Via<T, E>
+    pub fn via<K, F, T, R>(&self, key: K, f: F) -> Via<T>
     where
         K: Hash,
         T: Send + 'static,
-        E: Send + 'static,
         F: FnOnce() -> R,
-        R: IntoFuture<Item = T, Error = E>,
-        R::Future: Send + 'static,
+        R: Future<Output = T> + Send + 'static,
     {
         let h = {
             let mut hasher = DefaultHasher::new();

@@ -12,8 +12,8 @@ readme = "README.md"
 [dependencies]
 log = "0.4"
 lazy_static = "1.4"
-futures = "0.1"
-tokio = "0.1"
+futures = "0.3"
+tokio = { version = "0.2", features = ["full"] }
 
 [dev-dependencies]
 rand = "0.7"
