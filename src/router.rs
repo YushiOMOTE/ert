@@ -11,10 +11,20 @@ use tokio::{
     runtime::Builder,
     sync::{mpsc, oneshot},
     task::JoinHandle,
+    task_local,
 };
 
 type Sender = mpsc::UnboundedSender<BoxFuture<'static, ()>>;
 type Receiver = mpsc::UnboundedReceiver<BoxFuture<'static, ()>>;
+
+task_local! {
+    pub static ID: u64;
+}
+
+/// Helper to return the current worker id
+pub fn current() -> u64 {
+    ID.get()
+}
 
 lazy_static::lazy_static! {
     static ref GLOBAL_ROUTER: RwLock<Option<Router>> = { RwLock::new(None) };
@@ -70,7 +80,10 @@ fn open(workers: usize) -> (Vec<Sender>, Vec<Receiver>) {
 
 fn run(rxs: Vec<Receiver>) -> Vec<JoinHandle<()>> {
     rxs.into_iter()
-        .map(|rx| tokio::spawn(rx.for_each(|t| async move { t.await })))
+        .enumerate()
+        .map(|(i, rx)| {
+            tokio::spawn(rx.for_each(move |t| ID.scope(i as u64, async move { t.await })))
+        })
         .collect()
 }
 

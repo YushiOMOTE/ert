@@ -1,8 +1,8 @@
 use ert::prelude::*;
-use rand::Rng;
-use std::time::{Duration, Instant};
 use futures::prelude::*;
 use futures::stream;
+use rand::Rng;
+use std::time::Duration;
 use tokio::{fs::File, prelude::*, time::delay_for};
 
 struct Data {
