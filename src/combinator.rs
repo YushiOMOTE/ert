@@ -32,7 +32,11 @@ where
         match res {
             Ok(via) => via,
             Err((s, key)) => {
-                Router::run_on_thread(1024).set_as_global();
+                Router::with_global_mut(|r| {
+                    if r.is_none() {
+                        *r = Some(Router::run_on_thread(1024));
+                    }
+                });
                 Router::with_global(|r| r.unwrap().via(key, move || s))
             }
         }

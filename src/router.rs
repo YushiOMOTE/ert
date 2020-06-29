@@ -132,6 +132,13 @@ impl Router {
         f(GLOBAL_ROUTER.read().unwrap().as_ref())
     }
 
+    pub fn with_global_mut<F, R>(f: F) -> R
+    where
+        F: FnOnce(&mut Option<Router>) -> R,
+    {
+        f(GLOBAL_ROUTER.write().unwrap().deref_mut())
+    }
+
     pub fn via<K, F, T, R>(&self, key: K, f: F) -> Via<T>
     where
         K: Hash,
