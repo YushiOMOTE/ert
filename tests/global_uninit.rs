@@ -6,6 +6,8 @@ use futures::prelude::*;
 
 #[tokio::test]
 async fn global_uninit() {
+    env_logger::init();
+
     let c = Checker::new();
 
     let c1 = c.clone();
