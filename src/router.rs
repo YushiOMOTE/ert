@@ -3,6 +3,7 @@ use log::*;
 use std::{
     collections::hash_map::DefaultHasher,
     hash::{Hash, Hasher},
+    ops::DerefMut,
     pin::Pin,
     sync::{Arc, RwLock},
     task::{Context, Poll},
@@ -110,10 +111,8 @@ impl Router {
                 .build()
                 .unwrap();
             rt.block_on(async move {
-                for h in run(rxs) {
-                    if let Err(e) = h.await {
-                        error!("Couldn't join router worker thread successfully: {}", e);
-                    }
+                if let Err(e) = futures::future::try_join_all(run(rxs)).await {
+                    error!("Couldn't join router worker thread successfully: {}", e);
                 }
             });
         });
@@ -130,6 +129,13 @@ impl Router {
         F: FnOnce(Option<&Router>) -> R,
     {
         f(GLOBAL_ROUTER.read().unwrap().as_ref())
+    }
+
+    pub fn with_global_mut<F, R>(f: F) -> R
+    where
+        F: FnOnce(&mut Option<Router>) -> R,
+    {
+        f(GLOBAL_ROUTER.write().unwrap().deref_mut())
     }
 
     pub fn via<K, F, T, R>(&self, key: K, f: F) -> Via<T>
