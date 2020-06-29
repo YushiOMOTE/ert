@@ -3,6 +3,7 @@ use log::*;
 use std::{
     collections::hash_map::DefaultHasher,
     hash::{Hash, Hasher},
+    ops::DerefMut,
     pin::Pin,
     sync::{Arc, RwLock},
     task::{Context, Poll},
@@ -110,10 +111,8 @@ impl Router {
                 .build()
                 .unwrap();
             rt.block_on(async move {
-                for h in run(rxs) {
-                    if let Err(e) = h.await {
-                        error!("Couldn't join router worker thread successfully: {}", e);
-                    }
+                if let Err(e) = futures::future::try_join_all(run(rxs)).await {
+                    error!("Couldn't join router worker thread successfully: {}", e);
                 }
             });
         });
