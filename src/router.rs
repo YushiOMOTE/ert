@@ -1,4 +1,4 @@
-use futures::{future::BoxFuture, prelude::*};
+use futures::{future::BoxFuture, prelude::*, ready};
 use log::*;
 use std::{
     collections::hash_map::DefaultHasher,
@@ -17,6 +17,7 @@ use tokio::{
 
 type Sender = mpsc::UnboundedSender<BoxFuture<'static, ()>>;
 type Receiver = mpsc::UnboundedReceiver<BoxFuture<'static, ()>>;
+type CactchResult<T> = std::result::Result<T, Box<dyn std::any::Any + 'static + Send>>;
 
 task_local! {
     pub static ID: u64;
@@ -28,7 +29,7 @@ pub fn current() -> u64 {
 }
 
 lazy_static::lazy_static! {
-    static ref GLOBAL_ROUTER: RwLock<Option<Router>> = { RwLock::new(None) };
+    static ref GLOBAL_ROUTER: RwLock<Option<Router>> = RwLock::new(None);
 }
 
 #[derive(Clone)]
@@ -36,7 +37,7 @@ pub struct Router {
     tx: Arc<Vec<Sender>>,
 }
 
-pub struct Via<T>(oneshot::Receiver<T>);
+pub struct Via<T>(oneshot::Receiver<CactchResult<T>>);
 
 impl<T> Via<T> {
     fn new<F, R>(tx: &Sender, f: F) -> Self
@@ -47,14 +48,15 @@ impl<T> Via<T> {
     {
         let (otx, orx) = oneshot::channel();
 
-        let fut = f()
+        let fut = std::panic::AssertUnwindSafe(f())
+            .catch_unwind()
             .then(move |r| async move {
                 let _ = otx.send(r);
             })
             .boxed();
 
         if tx.send(fut).is_err() {
-            warn!("Couldn't send future to router; the future will never be resolved");
+            panic!("Couldn't send future to router; the future will never be resolved");
         }
 
         Self(orx)
@@ -65,12 +67,9 @@ impl<T> Future for Via<T> {
     type Output = T;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
-        match self.0.poll_unpin(cx) {
-            Poll::Ready(Ok(output)) => Poll::Ready(output),
-            Poll::Ready(Err(_)) | Poll::Pending => {
-                // Oneshot cancelled, meaning this feature never gets resolved
-                Poll::Pending
-            }
+        match ready!(self.0.poll_unpin(cx)) {
+            Ok(output) => Poll::Ready(output.expect("panic in the future in the ert router")),
+            Err(_) => panic!("the future in ert was cancelled"),
         }
     }
 }
