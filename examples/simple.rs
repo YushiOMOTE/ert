@@ -3,7 +3,11 @@ use futures::prelude::*;
 use futures::stream;
 use rand::Rng;
 use std::time::Duration;
-use tokio::{fs::File, prelude::*, time::delay_for};
+use tokio::{
+    fs::File,
+    io::{AsyncReadExt, AsyncWriteExt},
+    time::sleep,
+};
 
 struct Data {
     file: String,
@@ -12,8 +16,8 @@ struct Data {
 }
 
 async fn delay() {
-    let i = rand::thread_rng().gen_range(100, 500);
-    delay_for(Duration::from_micros(i)).await
+    let i = rand::thread_rng().gen_range(100..500);
+    sleep(Duration::from_micros(i)).await
 }
 
 async fn read_value_from_file(f: &str) -> usize {

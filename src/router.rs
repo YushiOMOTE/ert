@@ -14,6 +14,7 @@ use tokio::{
     task::JoinHandle,
     task_local,
 };
+use tokio_stream::wrappers::UnboundedReceiverStream;
 
 type Sender = mpsc::UnboundedSender<BoxFuture<'static, ()>>;
 type Receiver = mpsc::UnboundedReceiver<BoxFuture<'static, ()>>;
@@ -82,7 +83,10 @@ fn run(rxs: Vec<Receiver>) -> Vec<JoinHandle<()>> {
     rxs.into_iter()
         .enumerate()
         .map(|(i, rx)| {
-            tokio::spawn(rx.for_each(move |t| ID.scope(i as u64, async move { t.await })))
+            tokio::spawn(
+                UnboundedReceiverStream::new(rx)
+                    .for_each(move |t| ID.scope(i as u64, async move { t.await })),
+            )
         })
         .collect()
 }
@@ -104,11 +108,7 @@ impl Router {
         let (txs, rxs) = open(workers);
 
         std::thread::spawn(move || {
-            let mut rt = Builder::new()
-                .threaded_scheduler()
-                .enable_all()
-                .build()
-                .unwrap();
+            let rt = Builder::new_multi_thread().enable_all().build().unwrap();
             rt.block_on(async move {
                 if let Err(e) = futures::future::try_join_all(run(rxs)).await {
                     error!("Couldn't join router worker thread successfully: {}", e);
